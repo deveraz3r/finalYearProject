@@ -1,72 +1,71 @@
-import 'package:finalyearproject/view_model/services/firebase_auth_service.dart';
-import 'package:get/get.dart';
-import '../services/auth_service.dart';
-import '../views/parent_home_screen.dart';
-import '../views/child_home_page.dart';
-import '../views/psychiatrist_home_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import '../models/user_model.dart';
+import '../Auth_Service/Auth_service_Screen.dart';
 
-class LoginViewModel extends GetxController {
+class LoginViewModel extends ChangeNotifier {
   final AuthService _authService = AuthService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  var email = ''.obs;
-  var password = ''.obs;
-  var selectedRole = ''.obs;
-  var errorMessage = ''.obs;
-  var isLoading = false.obs;
+  final TextEditingController emailController = TextEditingController();
+  final TextEditingController passwordController = TextEditingController();
 
-  void login() async {
-    if (selectedRole.value.isEmpty) {
-      errorMessage.value = 'Please select a role.';
-      return;
+  String? selectedRole;
+  bool isLoading = false;
+  String errorMessage = '';
+
+  Future<UserModel?> loginUser() async {
+    final email = emailController.text.trim();
+    final password = passwordController.text.trim();
+
+    if (selectedRole == null) {
+      errorMessage = 'Please select a role.';
+      notifyListeners();
+      return null;
     }
-
-    isLoading.value = true;
-    errorMessage.value = '';
 
     try {
-      final user = await _authService.loginUser(email.value.trim(), password.value.trim());
+      isLoading = true;
+      notifyListeners();
+
+      User? user = await _authService.loginUser(email, password);
       if (user == null) {
-        errorMessage.value = 'Login failed. Please check your credentials.';
-        return;
+        errorMessage = 'Login failed. Please check your credentials.';
+        notifyListeners();
+        return null;
       }
 
-      final userDoc = await _authService.getUserData(user.uid);
+      DocumentSnapshot userDoc = await _firestore.collection('users').doc(user.uid).get();
+
       if (!userDoc.exists) {
-        errorMessage.value = 'User not found in the database.';
-        return;
+        errorMessage = 'User not found in the database.';
+        notifyListeners();
+        return null;
       }
 
-      final userData = userDoc.data() as Map<String, dynamic>?;
-      if (userData == null || !userData.containsKey('role')) {
-        errorMessage.value = 'Incomplete user data. Please contact support.';
-        return;
+      UserModel userModel = UserModel.fromMap(userDoc.data() as Map<String, dynamic>, user.uid);
+
+      if (userModel.role.toLowerCase() != selectedRole!.toLowerCase()) {
+        errorMessage = 'Role mismatch. Please select the correct role.';
+        notifyListeners();
+        return null;
       }
 
-      String role = userData['role'];
-      String username = userData['username'] ?? userData['name'] ?? '';
+      isLoading = false;
+      notifyListeners();
 
-      if (role.toLowerCase() != selectedRole.value.toLowerCase()) {
-        errorMessage.value = 'Role mismatch. Please select the correct role.';
-        return;
-      }
-
-      switch (role.toLowerCase()) {
-        case 'parent':
-          Get.off(() => ParentHomeScreen(userName: username));
-          break;
-        case 'child':
-          Get.off(() => ChildHomePage(userName: username));
-          break;
-        case 'psychiatrist':
-          Get.off(() => PsychiatristHomePage(userName: username));
-          break;
-        default:
-          errorMessage.value = 'Unknown role. Please contact support.';
-      }
+      return userModel;
     } catch (e) {
-      errorMessage.value = 'An error occurred: ${e.toString()}';
-    } finally {
-      isLoading.value = false;
+      errorMessage = 'An error occurred: ${e.toString()}';
+      isLoading = false;
+      notifyListeners();
+      return null;
     }
+  }
+
+  void clearError() {
+    errorMessage = '';
+    notifyListeners();
   }
 }
